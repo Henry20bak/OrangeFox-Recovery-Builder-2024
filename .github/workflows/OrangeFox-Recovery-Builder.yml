@@ -1,61 +1,18 @@
-name: Basic Recovery Builder
+name: Minimal Workflow
 
 on:
   workflow_dispatch:
-    inputs:
-      DEVICE_CODE:
-        description: 'DeviceCodename'
-        required: true
-        default: 'lake'
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Debug Environment
-        run: |
-          echo "Runner OS: $RUNNER_OS"
-          echo "GitHub Workspace: $GITHUB_WORKSPACE"
-          echo "GitHub Repository: $GITHUB_REPOSITORY"
-          echo "GitHub Actions Version: $GITHUB_ACTIONS_VERSION"
-          echo "GitHub Actor: $GITHUB_ACTOR"
-          echo "GitHub Event Name: $GITHUB_EVENT_NAME"
-          
-      - name: Test Simple Command
-        run: |
-          echo "Testing a simple command"
-          mkdir -p test_dir
-          echo "Hello World" > test_dir/hello.txt
-          ls -la test_dir/
-          
-      # Try to use the self-hosted approach to save artifacts
-      - name: Save Artifact Without Action
-        run: |
-          # Create an artifact directory
-          mkdir -p $GITHUB_WORKSPACE/artifact_output
-          echo "This is a test artifact" > $GITHUB_WORKSPACE/artifact_output/test.txt
-          echo "Device: ${{ github.event.inputs.DEVICE_CODE }}" > $GITHUB_WORKSPACE/artifact_output/device.txt
-          echo "Created by workflow" > $GITHUB_WORKSPACE/artifact_output/info.txt
-          
-          # Create an archive
-          cd $GITHUB_WORKSPACE
-          tar -czvf artifacts.tar.gz artifact_output/
-          
-          # List the created files
-          ls -la
-          ls -la artifact_output/
-          
-      - name: Set Artifact Path as Output
-        id: artifact
-        run: echo "::set-output name=path::$GITHUB_WORKSPACE/artifacts.tar.gz"
         
-      # Just provide information about where to find the artifact
-      - name: Artifact Information
+      - name: Run basic commands
         run: |
-          echo "Artifact has been created at: ${{ steps.artifact.outputs.path }}"
-          echo "Please download this manually if needed"
-          echo "Workflow run ID: ${{ github.run_id }}"
-          echo "Workflow run attempt: ${{ github.run_attempt }}"
+          echo "Hello World"
+          pwd
+          ls -la
+          echo "Current date: $(date)"

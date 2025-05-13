@@ -1,16 +1,12 @@
-name: Recovery Builder
+name: Simple Recovery Builder
 
 on:
   workflow_dispatch:
     inputs:
-      MANIFEST_URL:
-        description: 'ManifestURL'
+      DEVICE_CODE:
+        description: 'DeviceCodename'
         required: true
-        default: 'https://gitlab.com/OrangeFox/Manifest.git'
-      MANIFEST_BRANCH:
-        description: 'ManifestBranch'
-        required: true
-        default: 'fox_12.1'
+        default: 'lake'
       DEVICE_TREE_URL:
         description: 'DeviceTreeURL'
         required: true
@@ -19,178 +15,114 @@ on:
         description: 'DeviceTreeBranch'
         required: true
         default: 'twrp-12.1'
-      DEVICE_PATH:
-        description: 'DevicePath'
-        required: true
-        default: 'device/xiaomi/lake'
-      DEVICE_NAME:
-        description: 'DeviceName'
-        required: true
-        default: 'Poco C75'
-      DEVICE_CODE:
-        description: 'DeviceCodename'
-        required: true
-        default: 'lake'
-      VENDOR_BOOT:
-        description: 'For devices that use a vendor_boot.img'
-        required: true
-        default: 'true'
 
 jobs:
   build:
-    if: github.event.repository.owner.id == github.event.sender.id
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    runs-on: ubuntu-22.04
     steps:
-      - name: Debug GitHub Actions Environment
-        run: |
-          echo "GitHub Runner: $(echo $RUNNER_NAME)"
-          echo "GitHub Actions Version: $(echo $GITHUB_ACTIONS_VERSION)"
-          echo "Available Actions:"
-          ls -la /opt/hostedtoolcache/
-
-      - name: Check Out
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Cleanup
-        uses: rokibhasansagar/slimhub_actions@main
-
-      - name: Set Swap Space
+      - name: Debug Environment
         run: |
-          sudo swapoff -a
-          sudo fallocate -l 20G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          sudo swapon --show
+          echo "GitHub Runner: $RUNNER_NAME"
+          echo "GitHub Actions Version: $GITHUB_ACTIONS_VERSION"
+          echo "GitHub Workspace: $GITHUB_WORKSPACE"
+          echo "GitHub Repository: $GITHUB_REPOSITORY"
 
-      - name: Set Variables
-        run: |
-          echo "HOME=${GITHUB_WORKSPACE}" >> $GITHUB_ENV
-          echo "OUT_DIR=${GITHUB_WORKSPACE}/work/out/target/product/${{ github.event.inputs.DEVICE_CODE }}" >> $GITHUB_ENV
-          echo "TZ=Asia/Jakarta" >> $GITHUB_ENV
-
-      - name: Install Some Dependencies
+      - name: Setup Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install cpio wget xz-utils gzip bzip2
-          sudo apt-get install python3 python3-pip git tmate axel -y
-          sudo pip3 install pytz
+          sudo apt-get install -y python3 git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
 
-      - name: Install Required Packages
-        run: |
-          sudo apt-get update
-          sudo apt-get -y upgrade
-          sudo apt-get -y install gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib libc6-dev lib32ncurses5-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libwxgtk3.0-gtk3-dev libxml2 lzop pngcrush schedtool squashfs-tools imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev python
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-      - name: Install OpenJDK
+      - name: Install Repo tool
         run: |
-          sudo apt-get update
-          sudo apt-get install openjdk-8-jdk -y
-
-      - name: Install Git-Repo
-        run: |
-          mkdir ~/bin
-          echo "PATH=$HOME/bin:$PATH" >> $GITHUB_ENV
+          mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+x ~/bin/repo
-          
-      - name: Initialize Repo
-        run: |
-          mkdir -p ${GITHUB_WORKSPACE}/work
-          cd ${GITHUB_WORKSPACE}/work
-          git config --global user.name "Henry20bak"
-          git config --global user.email "henriekens@gmail.com"
-          repo init --depth=1 -u ${{ github.event.inputs.MANIFEST_URL }} -b ${{ github.event.inputs.MANIFEST_BRANCH }}
-          
-      - name: Sync Repo
-        run: |
-          cd ${GITHUB_WORKSPACE}/work
-          repo sync -j$(nproc --all) -f --force-sync
-          ls -la
+          echo "PATH=$HOME/bin:$PATH" >> $GITHUB_ENV
 
-      - name: Clone Device Tree
+      # Create directories for build
+      - name: Prepare Build Directory
         run: |
-          cd ${GITHUB_WORKSPACE}/work
-          git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ${{ github.event.inputs.DEVICE_PATH }}
+          mkdir -p $GITHUB_WORKSPACE/orangefox_build
+          cd $GITHUB_WORKSPACE/orangefox_build
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
           
-      - name: Create OrangeFox Vendorsetup
+      # Initialize the OrangeFox manifest
+      - name: Initialize OrangeFox source
+        working-directory: ${{ github.workspace }}/orangefox_build
         run: |
-          cd ${GITHUB_WORKSPACE}/work
-          mkdir -p ${GITHUB_WORKSPACE}/work/${{ github.event.inputs.DEVICE_PATH }}/vendorsetup
-          cat <<EOF > ${GITHUB_WORKSPACE}/work/${{ github.event.inputs.DEVICE_PATH }}/vendorsetup/fox_12.1.sh
-          # OrangeFox build variables for ${{ github.event.inputs.DEVICE_NAME }}
+          repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1
+
+      # Sync the source (with limited depth to save time)
+      - name: Sync OrangeFox Source
+        working-directory: ${{ github.workspace }}/orangefox_build
+        run: |
+          repo sync -j$(nproc) --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune
+
+      # Clone the device tree
+      - name: Clone Device Tree
+        working-directory: ${{ github.workspace }}/orangefox_build
+        run: |
+          git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} device/xiaomi/${{ github.event.inputs.DEVICE_CODE }}
+
+      # Create OrangeFox configuration
+      - name: Setup OrangeFox Configuration
+        working-directory: ${{ github.workspace }}/orangefox_build
+        run: |
+          mkdir -p device/xiaomi/${{ github.event.inputs.DEVICE_CODE }}/vendorsetup
+          cat > device/xiaomi/${{ github.event.inputs.DEVICE_CODE }}/vendorsetup/fox_12.1.sh << 'EOF'
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_VERSION="R11.1"
           export FOX_BUILD_TYPE="Unofficial"
-          export FOX_VARIANT="A12"
           export OF_MAINTAINER="Henry20bak"
           export OF_AB_DEVICE=1
           export OF_VIRTUAL_AB_DEVICE=1
-          export OF_NO_SPLASH_CHANGE=0
           export OF_DONT_PATCH_ENCRYPTED_DEVICE=1
           export OF_USE_MAGISKBOOT_FOR_ALL_PATCHES=1
-          export FOX_USE_SPECIFIC_MAGISK_ZIP=~/Magisk/Magisk-v26.4.zip
           export OF_ENABLE_LPTOOLS=1
-          # Additional customizations
-          export OF_SKIP_DECRYPTED_ADOPTED_STORAGE=1
-          export OF_NO_TREBLE_COMPATIBILITY_CHECK=1
           EOF
-          
-      - name: Check Device Tree
+
+      # Apply the readonly-buildfiles patch
+      - name: Apply Build Patches
+        working-directory: ${{ github.workspace }}/orangefox_build
         run: |
-          cd ${GITHUB_WORKSPACE}/work
-          ls -la ${{ github.event.inputs.DEVICE_PATH }}
-          
-      - name: Apply Readonly-Buildfiles Patch
+          sed -i 's/readonly-buildfiles.txt/readonly-buildfiles.bak/g' build/make/core/Makefile || echo "Makefile patch not needed"
+          touch build/make/core/readonly-buildfiles.bak || echo "Creating readonly-buildfiles.bak not needed"
+
+      # Build the recovery
+      - name: Build Recovery
+        working-directory: ${{ github.workspace }}/orangefox_build
         run: |
-          cd ${GITHUB_WORKSPACE}/work
-          sed -i 's/readonly-buildfiles.txt/readonly-buildfiles.bak/g' build/make/core/Makefile
-          touch build/make/core/readonly-buildfiles.bak
-          
-      - name: Build OrangeFox Recovery
-        run: |
-          cd ${GITHUB_WORKSPACE}/work
           source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
           export LC_ALL=C
           lunch omni_${{ github.event.inputs.DEVICE_CODE }}-eng
           mka recoveryimage
-          
-      - name: List Files After Build
+
+      # Find the recovery image
+      - name: Find Recovery Image
+        working-directory: ${{ github.workspace }}/orangefox_build
         run: |
-          cd ${OUT_DIR}
-          ls -la
-          
-      # Upload the build artifacts directly to GitHub without using the actions/upload-artifact action
-      - name: Create Artifact Directory
-        if: success()
-        run: |
+          echo "Finding recovery images..."
+          find out/target/product/${{ github.event.inputs.DEVICE_CODE }} -name "*.img" -o -name "*.zip"
           mkdir -p $GITHUB_WORKSPACE/artifacts
-          cp ${{ env.OUT_DIR }}/*.img $GITHUB_WORKSPACE/artifacts/ || true
-          cp ${{ env.OUT_DIR }}/*.zip $GITHUB_WORKSPACE/artifacts/ || true
+          cp out/target/product/${{ github.event.inputs.DEVICE_CODE }}/*.img $GITHUB_WORKSPACE/artifacts/ || echo "No img files found"
+          cp out/target/product/${{ github.event.inputs.DEVICE_CODE }}/*.zip $GITHUB_WORKSPACE/artifacts/ || echo "No zip files found"
           ls -la $GITHUB_WORKSPACE/artifacts/
           
-      - name: Store artifacts
-        if: success()
-        uses: actions/upload-artifact@v4  # Using latest v4 instead of v3
+      # Upload the artifacts using actions/upload-artifact@v4
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: OrangeFox-${{ github.event.inputs.DEVICE_CODE }}-${{ github.run_id }}
-          path: $GITHUB_WORKSPACE/artifacts
-          if-no-files-found: warn
-          retention-days: 30
-          
-      # Disable Release creation for now until artifact upload works
-      # - name: Create Release
-      #   uses: softprops/action-gh-release@v2  # Updated from v1 to v2
-      #   if: success()
-      #   with:
-      #     tag_name: ${{ github.event.inputs.DEVICE_CODE }}-${{ github.run_id }}
-      #     name: OrangeFox-${{ github.event.inputs.DEVICE_CODE }}-${{ github.run_id }}
-      #     files: |
-      #       $GITHUB_WORKSPACE/artifacts/*
-      #     body: OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} (${{ github.event.inputs.DEVICE_CODE }})
-      #     draft: false
-      #     prerelease: false
-      #     token: ${{ secrets.GITHUB_TOKEN }}
+          name: recovery-output
+          path: ${{ github.workspace }}/artifacts

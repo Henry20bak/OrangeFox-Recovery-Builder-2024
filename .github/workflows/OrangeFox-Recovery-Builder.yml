@@ -1,4 +1,4 @@
-name: Simple Recovery Builder
+name: Basic Recovery Builder
 
 on:
   workflow_dispatch:
@@ -7,122 +7,55 @@ on:
         description: 'DeviceCodename'
         required: true
         default: 'lake'
-      DEVICE_TREE_URL:
-        description: 'DeviceTreeURL'
-        required: true
-        default: 'https://github.com/Henry20bak/recovery_xiaomi_lake.git'
-      DEVICE_TREE_BRANCH:
-        description: 'DeviceTreeBranch'
-        required: true
-        default: 'twrp-12.1'
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Debug Environment
         run: |
-          echo "GitHub Runner: $RUNNER_NAME"
-          echo "GitHub Actions Version: $GITHUB_ACTIONS_VERSION"
+          echo "Runner OS: $RUNNER_OS"
           echo "GitHub Workspace: $GITHUB_WORKSPACE"
           echo "GitHub Repository: $GITHUB_REPOSITORY"
-
-      - name: Setup Build Environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3 git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
-
-      - name: Set up JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Install Repo tool
-        run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          echo "PATH=$HOME/bin:$PATH" >> $GITHUB_ENV
-
-      # Create directories for build
-      - name: Prepare Build Directory
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/orangefox_build
-          cd $GITHUB_WORKSPACE/orangefox_build
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
+          echo "GitHub Actions Version: $GITHUB_ACTIONS_VERSION"
+          echo "GitHub Actor: $GITHUB_ACTOR"
+          echo "GitHub Event Name: $GITHUB_EVENT_NAME"
           
-      # Initialize the OrangeFox manifest
-      - name: Initialize OrangeFox source
-        working-directory: ${{ github.workspace }}/orangefox_build
+      - name: Test Simple Command
         run: |
-          repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1
-
-      # Sync the source (with limited depth to save time)
-      - name: Sync OrangeFox Source
-        working-directory: ${{ github.workspace }}/orangefox_build
-        run: |
-          repo sync -j$(nproc) --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune
-
-      # Clone the device tree
-      - name: Clone Device Tree
-        working-directory: ${{ github.workspace }}/orangefox_build
-        run: |
-          git clone ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} device/xiaomi/${{ github.event.inputs.DEVICE_CODE }}
-
-      # Create OrangeFox configuration
-      - name: Setup OrangeFox Configuration
-        working-directory: ${{ github.workspace }}/orangefox_build
-        run: |
-          mkdir -p device/xiaomi/${{ github.event.inputs.DEVICE_CODE }}/vendorsetup
-          cat > device/xiaomi/${{ github.event.inputs.DEVICE_CODE }}/vendorsetup/fox_12.1.sh << 'EOF'
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export FOX_VERSION="R11.1"
-          export FOX_BUILD_TYPE="Unofficial"
-          export OF_MAINTAINER="Henry20bak"
-          export OF_AB_DEVICE=1
-          export OF_VIRTUAL_AB_DEVICE=1
-          export OF_DONT_PATCH_ENCRYPTED_DEVICE=1
-          export OF_USE_MAGISKBOOT_FOR_ALL_PATCHES=1
-          export OF_ENABLE_LPTOOLS=1
-          EOF
-
-      # Apply the readonly-buildfiles patch
-      - name: Apply Build Patches
-        working-directory: ${{ github.workspace }}/orangefox_build
-        run: |
-          sed -i 's/readonly-buildfiles.txt/readonly-buildfiles.bak/g' build/make/core/Makefile || echo "Makefile patch not needed"
-          touch build/make/core/readonly-buildfiles.bak || echo "Creating readonly-buildfiles.bak not needed"
-
-      # Build the recovery
-      - name: Build Recovery
-        working-directory: ${{ github.workspace }}/orangefox_build
-        run: |
-          source build/envsetup.sh
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-          lunch omni_${{ github.event.inputs.DEVICE_CODE }}-eng
-          mka recoveryimage
-
-      # Find the recovery image
-      - name: Find Recovery Image
-        working-directory: ${{ github.workspace }}/orangefox_build
-        run: |
-          echo "Finding recovery images..."
-          find out/target/product/${{ github.event.inputs.DEVICE_CODE }} -name "*.img" -o -name "*.zip"
-          mkdir -p $GITHUB_WORKSPACE/artifacts
-          cp out/target/product/${{ github.event.inputs.DEVICE_CODE }}/*.img $GITHUB_WORKSPACE/artifacts/ || echo "No img files found"
-          cp out/target/product/${{ github.event.inputs.DEVICE_CODE }}/*.zip $GITHUB_WORKSPACE/artifacts/ || echo "No zip files found"
-          ls -la $GITHUB_WORKSPACE/artifacts/
+          echo "Testing a simple command"
+          mkdir -p test_dir
+          echo "Hello World" > test_dir/hello.txt
+          ls -la test_dir/
           
-      # Upload the artifacts using actions/upload-artifact@v4
-      - name: Upload Build Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: recovery-output
-          path: ${{ github.workspace }}/artifacts
+      # Try to use the self-hosted approach to save artifacts
+      - name: Save Artifact Without Action
+        run: |
+          # Create an artifact directory
+          mkdir -p $GITHUB_WORKSPACE/artifact_output
+          echo "This is a test artifact" > $GITHUB_WORKSPACE/artifact_output/test.txt
+          echo "Device: ${{ github.event.inputs.DEVICE_CODE }}" > $GITHUB_WORKSPACE/artifact_output/device.txt
+          echo "Created by workflow" > $GITHUB_WORKSPACE/artifact_output/info.txt
+          
+          # Create an archive
+          cd $GITHUB_WORKSPACE
+          tar -czvf artifacts.tar.gz artifact_output/
+          
+          # List the created files
+          ls -la
+          ls -la artifact_output/
+          
+      - name: Set Artifact Path as Output
+        id: artifact
+        run: echo "::set-output name=path::$GITHUB_WORKSPACE/artifacts.tar.gz"
+        
+      # Just provide information about where to find the artifact
+      - name: Artifact Information
+        run: |
+          echo "Artifact has been created at: ${{ steps.artifact.outputs.path }}"
+          echo "Please download this manually if needed"
+          echo "Workflow run ID: ${{ github.run_id }}"
+          echo "Workflow run attempt: ${{ github.run_attempt }}"

@@ -43,6 +43,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Debug GitHub Actions Environment
+        run: |
+          echo "GitHub Runner: $(echo $RUNNER_NAME)"
+          echo "GitHub Actions Version: $(echo $GITHUB_ACTIONS_VERSION)"
+          echo "Available Actions:"
+          ls -la /opt/hostedtoolcache/
+
       - name: Check Out
         uses: actions/checkout@v4
 
@@ -156,24 +163,34 @@ jobs:
           cd ${OUT_DIR}
           ls -la
           
-      - name: Upload Recovery Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: OrangeFox-Recovery-${{ github.event.inputs.DEVICE_CODE }}
-          path: |
-            ${{ env.OUT_DIR }}/*.img
-            ${{ env.OUT_DIR }}/*.zip
-            
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      # Upload the build artifacts directly to GitHub without using the actions/upload-artifact action
+      - name: Create Artifact Directory
         if: success()
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/artifacts
+          cp ${{ env.OUT_DIR }}/*.img $GITHUB_WORKSPACE/artifacts/ || true
+          cp ${{ env.OUT_DIR }}/*.zip $GITHUB_WORKSPACE/artifacts/ || true
+          ls -la $GITHUB_WORKSPACE/artifacts/
+          
+      - name: Store artifacts
+        if: success()
+        uses: actions/upload-artifact@v4  # Using latest v4 instead of v3
         with:
-          tag_name: ${{ github.event.inputs.DEVICE_CODE }}-${{ github.run_id }}
           name: OrangeFox-${{ github.event.inputs.DEVICE_CODE }}-${{ github.run_id }}
-          files: |
-            ${{ env.OUT_DIR }}/*.img
-            ${{ env.OUT_DIR }}/*.zip
-          body: OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} (${{ github.event.inputs.DEVICE_CODE }})
-          draft: false
-          prerelease: false
-          token: ${{ secrets.GITHUB_TOKEN }}
+          path: $GITHUB_WORKSPACE/artifacts
+          if-no-files-found: warn
+          retention-days: 30
+          
+      # Disable Release creation for now until artifact upload works
+      # - name: Create Release
+      #   uses: softprops/action-gh-release@v2  # Updated from v1 to v2
+      #   if: success()
+      #   with:
+      #     tag_name: ${{ github.event.inputs.DEVICE_CODE }}-${{ github.run_id }}
+      #     name: OrangeFox-${{ github.event.inputs.DEVICE_CODE }}-${{ github.run_id }}
+      #     files: |
+      #       $GITHUB_WORKSPACE/artifacts/*
+      #     body: OrangeFox Recovery for ${{ github.event.inputs.DEVICE_NAME }} (${{ github.event.inputs.DEVICE_CODE }})
+      #     draft: false
+      #     prerelease: false
+      #     token: ${{ secrets.GITHUB_TOKEN }}
